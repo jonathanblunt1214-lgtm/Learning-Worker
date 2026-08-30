@@ -16,4 +16,3 @@ This repository contains no training documents, extracted source content, transp
 - Promotion, repository assimilation, and writes to The Crucible: prohibited
 
 The workflow has a concurrency lock, a 20-minute job timeout, read-only repository permissions, and a manual kill-switch file at `%LOCALAPPDATA%\The-Crucible\scientific-learning\EXTRACTION-KILL`.
-

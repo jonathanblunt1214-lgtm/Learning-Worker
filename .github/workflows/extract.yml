@@ -33,4 +33,3 @@ jobs:
         run: >-
           & .\scripts\run-extraction.ps1
           -EnginePath (Resolve-Path .\crucible-engine)
-
