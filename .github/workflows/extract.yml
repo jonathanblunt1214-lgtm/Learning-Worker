@@ -1,0 +1,36 @@
+name: Crucible claim extraction
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crucible-claim-extraction
+  cancel-in-progress: false
+
+jobs:
+  extract:
+    runs-on: [self-hosted, Windows, X64, crucible-learning]
+    timeout-minutes: 20
+    steps:
+      - name: Check out worker controls
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Check out exact current Crucible development
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: jonathanblunt1214-lgtm/The-Crucible
+          ref: development
+          path: crucible-engine
+          persist-credentials: false
+
+      - name: Run deterministic bounded extraction
+        shell: powershell
+        run: >-
+          & .\scripts\run-extraction.ps1
+          -EnginePath (Resolve-Path .\crucible-engine)
+

@@ -1,0 +1,5 @@
+.runner/
+_diag/
+_work/
+*.log
+
