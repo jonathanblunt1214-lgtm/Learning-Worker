@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: crucible-claim-extraction
@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   extract:
-    runs-on: [self-hosted, Windows, X64, crucible-learning]
+    runs-on: windows-latest
     timeout-minutes: 20
     steps:
       - name: Check out worker controls
@@ -28,8 +28,9 @@ jobs:
           path: crucible-engine
           persist-credentials: false
 
-      - name: Run deterministic bounded extraction
+      - name: Run deterministic encrypted hosted extraction
         shell: powershell
-        run: >-
-          & .\scripts\run-extraction.ps1
-          -EnginePath (Resolve-Path .\crucible-engine)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEARNING_WORKER_KEY: ${{ secrets.LEARNING_WORKER_KEY }}
+        run: .\scripts\run-hosted-extraction.ps1
