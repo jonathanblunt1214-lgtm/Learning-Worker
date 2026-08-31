@@ -9,6 +9,7 @@ $learningRoot = Join-Path $workspace 'learning'
 $sourcesRoot = Join-Path $learningRoot 'sources'
 $queueFile = Join-Path $sourcesRoot 'source-queue.json'
 $throughputFile = Join-Path $learningRoot 'adaptive-throughput.json'
+$oversightApprovalFile = Join-Path $learningRoot 'oversight-approvals.json'
 $runStartedAt = Get-Date
 if ($env:GITHUB_REPOSITORY -ne 'jonathanblunt1214-lgtm/Learning-Worker') { throw 'Unexpected repository identity.' }
 if (-not $env:LEARNING_WORKER_KEY) { throw 'Encrypted-state key is unavailable.' }
@@ -18,7 +19,7 @@ node scripts/crypt-bundle.js decrypt $encryptedState $stateZip
 New-Item -ItemType Directory -Path $sourcesRoot -Force | Out-Null
 Expand-Archive -LiteralPath $sourcesZip -DestinationPath $sourcesRoot
 Expand-Archive -LiteralPath $stateZip -DestinationPath $learningRoot
-node scripts/prepare-hosted-queue.js $queueFile $sourcesRoot
+node scripts/prepare-hosted-queue.js $queueFile $sourcesRoot $oversightApprovalFile
 $env:PYTHONPATH = Join-Path $sourcesRoot 'runtime-python'
 $env:CRUCIBLE_LEARNING_PROJECT_ID = $projectId
 $env:CRUCIBLE_LEARNING_ROOT = $learningRoot
@@ -40,6 +41,7 @@ $stateStage = Join-Path $workspace 'state-stage'; New-Item -ItemType Directory -
 Copy-Item -LiteralPath $queueFile -Destination (Join-Path $stateStage 'sources\source-queue.json')
 Get-ChildItem -LiteralPath $learningRoot -File -Filter '*.learning.json' | Copy-Item -Destination $stateStage
 Copy-Item -LiteralPath $throughputFile -Destination $stateStage
+if (Test-Path -LiteralPath $oversightApprovalFile) { Copy-Item -LiteralPath $oversightApprovalFile -Destination $stateStage }
 Compress-Archive -Path (Join-Path $stateStage '*') -DestinationPath $stateZip -CompressionLevel Optimal -Force
 Remove-Item -LiteralPath $encryptedState -Force
 node scripts/crypt-bundle.js encrypt $stateZip $encryptedState

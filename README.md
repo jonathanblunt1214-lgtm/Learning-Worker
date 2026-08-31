@@ -14,5 +14,6 @@ This repository contains no plaintext training documents, extracted source conte
 - Candidate-count cutoff inside a bounded source window: none
 - Learning classification after extraction: `Insufficient Evidence`
 - Promotion, repository assimilation, and writes to The Crucible: prohibited
+- Extraction requires a signed independent-oversight approval bound to the exact source content hash; unvetted sources remain inhibited.
 
 The workflow has a concurrency lock and a 20-minute job timeout. Adaptive throughput state is retained only inside the authenticated encrypted state asset. A prior timed-out workflow immediately selects 35 pages; two consecutive completed runs longer than 15 minutes also select 35. Three consecutive runs of 10 minutes or less restore 70 pages. Its token can update only this private worker repository's encrypted release-state asset. It cannot write to The Crucible.
