@@ -24,12 +24,12 @@ $env:CRUCIBLE_LEARNING_PROJECT_ID = $projectId
 $env:CRUCIBLE_LEARNING_ROOT = $learningRoot
 $env:CRUCIBLE_SOURCE_QUEUE = $queueFile
 $env:CRUCIBLE_EXTRACTION_BATCH_SIZE = '25'
-$env:CRUCIBLE_EXTRACTION_MAX_DOCUMENTS = '10'
+$env:CRUCIBLE_EXTRACTION_MAX_DOCUMENTS = '9'
 $priorRun = gh run list --repo $env:GITHUB_REPOSITORY --workflow extract.yml --limit 5 --json databaseId,status,conclusion,createdAt,updatedAt | ConvertFrom-Json | Where-Object { [string]$_.databaseId -ne $env:GITHUB_RUN_ID -and $_.status -eq 'completed' } | Select-Object -First 1
 $previousConclusion = if ($priorRun) { [string]$priorRun.conclusion } else { '' }
 $throughput = node scripts/adaptive-throughput.js plan $throughputFile $previousConclusion | ConvertFrom-Json
 $env:CRUCIBLE_PDF_PAGES_PER_BATCH = [string]$throughput.pagesPerDocument
-Write-Output "Adaptive extraction plan: maxSources=25 maxDocuments=10 pagesPerDocument=$($throughput.pagesPerDocument) previousConclusion=$previousConclusion"
+Write-Output "Adaptive extraction plan: maxSources=25 maxDocuments=9 pagesPerDocument=$($throughput.pagesPerDocument) previousConclusion=$previousConclusion"
 $env:CRUCIBLE_PYTHON = (Get-Command python).Source
 Push-Location crucible-engine
 try { node src/claimExtractionWorkerCli.js readiness; if ($LASTEXITCODE -ne 0) { throw 'Extraction readiness failed.' }; node src/claimExtractionWorkerCli.js run; if ($LASTEXITCODE -ne 0) { throw 'Extraction failed.' } } finally { Pop-Location }
