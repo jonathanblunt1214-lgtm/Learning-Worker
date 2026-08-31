@@ -19,6 +19,11 @@ node scripts/crypt-bundle.js decrypt $encryptedState $stateZip
 New-Item -ItemType Directory -Path $sourcesRoot -Force | Out-Null
 Expand-Archive -LiteralPath $sourcesZip -DestinationPath $sourcesRoot
 Expand-Archive -LiteralPath $stateZip -DestinationPath $learningRoot
+$oversightPublicKey = Join-Path $workspace 'oversight-public.pem'
+if (-not $env:OVERSIGHT_SIGNING_PUBLIC_KEY) { throw 'Independent oversight public key is unavailable.' }
+[IO.File]::WriteAllText($oversightPublicKey, $env:OVERSIGHT_SIGNING_PUBLIC_KEY)
+node scripts/ingest-oversight-results.js (Join-Path (Get-Location) 'oversight-results\results') $oversightPublicKey $oversightApprovalFile
+Remove-Item -LiteralPath $oversightPublicKey -Force
 node scripts/prepare-hosted-queue.js $queueFile $sourcesRoot $oversightApprovalFile
 $env:PYTHONPATH = Join-Path $sourcesRoot 'runtime-python'
 $env:CRUCIBLE_LEARNING_PROJECT_ID = $projectId
