@@ -2,7 +2,7 @@
 
 Private scheduling control for The Crucible's deterministic claim-extraction worker.
 
-This repository contains no plaintext training documents, extracted source content, transport keys, credentials, or durable learning state. A GitHub-hosted Windows runner checks out the public `development` branch of The Crucible and processes client-side authenticated encrypted source/state release assets every ten minutes. The AES-256-GCM key is stored only as a GitHub Actions secret and a local Windows DPAPI recovery copy.
+This repository contains no committed plaintext training documents, extracted source content, transport keys, credentials, or durable learning state. Every ten minutes its ephemeral GitHub-hosted worker pulls only oversight-approved ciphertext from the separate private vetted-custody store. Crucible cannot publish to that store. The worker verifies the independent oversight signature and exact ciphertext hash before temporary decryption, then destroys runner plaintext and persists only authenticated encrypted state.
 
 ## Fixed operating boundary
 

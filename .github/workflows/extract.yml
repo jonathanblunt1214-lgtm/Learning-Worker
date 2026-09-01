@@ -37,10 +37,24 @@ jobs:
           persist-credentials: false
           ssh-key: ${{ secrets.OVERSIGHT_READ_DEPLOY_KEY }}
 
+      - name: Pull only oversight-approved encrypted custody
+        shell: powershell
+        env:
+          VETTED_STATE_READ_KEY: ${{ secrets.VETTED_STATE_READ_KEY }}
+        run: |
+          if (-not $env:VETTED_STATE_READ_KEY) { throw 'Vetted-state read identity is unavailable.' }
+          $ssh = Join-Path $env:RUNNER_TEMP 'vetted-state-ssh'
+          New-Item -ItemType Directory -Path $ssh -Force | Out-Null
+          [IO.File]::WriteAllText((Join-Path $ssh 'key'), $env:VETTED_STATE_READ_KEY)
+          [IO.File]::WriteAllText((Join-Path $ssh 'known_hosts'), "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl`n")
+          $env:GIT_SSH_COMMAND = "ssh -i `"$(Join-Path $ssh 'key')`" -o IdentitiesOnly=yes -o UserKnownHostsFile=`"$(Join-Path $ssh 'known_hosts')`" -o StrictHostKeyChecking=yes"
+          git clone --depth 1 git@github.com:jonathanblunt1214-lgtm/Crucible-Vetted-Learning-State.git vetted-state
+
       - name: Run deterministic encrypted hosted extraction
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
           LEARNING_WORKER_KEY: ${{ secrets.LEARNING_WORKER_KEY }}
+          CRUCIBLE_VETTED_BUNDLE_KEY: ${{ secrets.CRUCIBLE_VETTED_BUNDLE_KEY }}
           OVERSIGHT_SIGNING_PUBLIC_KEY: ${{ vars.OVERSIGHT_SIGNING_PUBLIC_KEY }}
         run: .\scripts\run-hosted-extraction.ps1

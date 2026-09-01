@@ -1,28 +1,33 @@
 $ErrorActionPreference = 'Stop'
 $projectId = 'github:jonathanblunt1214-lgtm/The-Crucible'
 $workspace = $env:RUNNER_TEMP
-$encryptedSources = Join-Path $workspace 'sources.zip.enc'
 $encryptedState = Join-Path $workspace 'state.zip.enc'
-$sourcesZip = Join-Path $workspace 'sources.zip'
 $stateZip = Join-Path $workspace 'state.zip'
+$sourceTar = Join-Path $workspace 'vetted-source-bundle.tar.gz'
+$vettedRoot = Join-Path $workspace 'vetted-source-root'
 $learningRoot = Join-Path $workspace 'learning'
-$sourcesRoot = Join-Path $learningRoot 'sources'
-$queueFile = Join-Path $sourcesRoot 'source-queue.json'
+$sourcesRoot = Join-Path $vettedRoot 'sources'
+$queueFile = Join-Path $learningRoot 'sources\source-queue.json'
 $throughputFile = Join-Path $learningRoot 'adaptive-throughput.json'
 $oversightApprovalFile = Join-Path $learningRoot 'oversight-approvals.json'
+$vettedApprovalFile = Join-Path $workspace 'vetted-oversight-approvals.json'
 $runStartedAt = Get-Date
 if ($env:GITHUB_REPOSITORY -ne 'jonathanblunt1214-lgtm/Learning-Worker') { throw 'Unexpected repository identity.' }
 if (-not $env:LEARNING_WORKER_KEY) { throw 'Encrypted-state key is unavailable.' }
-gh release download worker-state --repo $env:GITHUB_REPOSITORY --pattern 'sources.zip.enc' --pattern 'state.zip.enc' --dir $workspace --clobber
-node scripts/crypt-bundle.js decrypt $encryptedSources $sourcesZip
-node scripts/crypt-bundle.js decrypt $encryptedState $stateZip
-New-Item -ItemType Directory -Path $sourcesRoot -Force | Out-Null
-Expand-Archive -LiteralPath $sourcesZip -DestinationPath $sourcesRoot
-Expand-Archive -LiteralPath $stateZip -DestinationPath $learningRoot
 $oversightPublicKey = Join-Path $workspace 'oversight-public.pem'
 if (-not $env:OVERSIGHT_SIGNING_PUBLIC_KEY) { throw 'Independent oversight public key is unavailable.' }
 [IO.File]::WriteAllText($oversightPublicKey, $env:OVERSIGHT_SIGNING_PUBLIC_KEY)
-node scripts/ingest-oversight-results.js (Join-Path (Get-Location) 'oversight-results\results') $oversightPublicKey $oversightApprovalFile
+node scripts/vetted-custody.js (Join-Path (Get-Location) 'vetted-state') $sourceTar $oversightPublicKey $vettedApprovalFile
+if ($LASTEXITCODE -ne 0) { throw 'Vetted encrypted custody verification failed.' }
+New-Item -ItemType Directory -Path $vettedRoot -Force | Out-Null
+tar -xzf $sourceTar -C $vettedRoot
+New-Item -ItemType Directory -Path (Split-Path $queueFile) -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $vettedRoot 'source-queue.json') -Destination $queueFile
+Get-ChildItem -LiteralPath $vettedRoot -File -Filter '*.learning.json' | Copy-Item -Destination $learningRoot
+$priorStateAvailable = $true
+try { gh release download worker-state --repo $env:GITHUB_REPOSITORY --pattern 'state.zip.enc' --dir $workspace --clobber } catch { $priorStateAvailable = $false }
+if ($priorStateAvailable -and (Test-Path -LiteralPath $encryptedState)) { node scripts/crypt-bundle.js decrypt $encryptedState $stateZip; Expand-Archive -LiteralPath $stateZip -DestinationPath $learningRoot -Force }
+Copy-Item -LiteralPath $vettedApprovalFile -Destination $oversightApprovalFile -Force
 Remove-Item -LiteralPath $oversightPublicKey -Force
 node scripts/prepare-hosted-queue.js $queueFile $sourcesRoot $oversightApprovalFile
 $env:PYTHONPATH = Join-Path $sourcesRoot 'runtime-python'
