@@ -4,21 +4,22 @@ const path = require('node:path');
 function mergeCandidateOnly({ activeStore, priorStore, candidateDigest }) {
   const active = activeStore.read();
   const prior = priorStore.read();
-  if (prior.knowledgeVersions.length || prior.activeVersion !== null) {
-    throw new Error('Prior worker state contains knowledge versions; automatic merge is forbidden.');
-  }
-
   const activeById = new Map(
     active.candidateRecords.map((record) => [record.candidate.id, record]),
   );
   const missing = [];
   let duplicates = 0;
+  let quarantinedRecords = 0;
 
   for (const record of prior.candidateRecords) {
     if (record.state !== 'candidate' || record.recordRevision !== 0) {
-      throw new Error(
-        `Prior worker record ${record.candidate.id} advanced beyond candidate-only state.`,
-      );
+      const authoritative = activeById.get(record.candidate.id);
+      if (authoritative && candidateDigest(authoritative) === candidateDigest(record)) {
+        duplicates += 1;
+        continue;
+      }
+      quarantinedRecords += 1;
+      continue;
     }
     const existing = activeById.get(record.candidate.id);
     if (existing) {
@@ -32,7 +33,92 @@ function mergeCandidateOnly({ activeStore, priorStore, candidateDigest }) {
   }
 
   activeStore.ingestMany(missing);
-  return { imported: missing.length, duplicates, priorCandidates: prior.candidateRecords.length };
+  const activeKnowledge = new Set(active.knowledgeVersions.map(candidateDigest));
+  const quarantinedKnowledgeVersions = prior.knowledgeVersions.filter(
+    (version) => !activeKnowledge.has(candidateDigest(version)),
+  ).length;
+  const quarantinedActiveVersion =
+    prior.activeVersion !== null && prior.activeVersion !== active.activeVersion;
+  return {
+    summary: {
+      imported: missing.length,
+      duplicates,
+      priorCandidates: prior.candidateRecords.length,
+      quarantinedRecords,
+      quarantinedKnowledgeVersions,
+      quarantinedActiveVersion,
+    },
+    quarantineRequired:
+      quarantinedRecords > 0 ||
+      quarantinedKnowledgeVersions > 0 ||
+      quarantinedActiveVersion,
+  };
+}
+
+function writeJsonAtomic(file, value) {
+  const temporary = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, {
+    flag: 'wx',
+    mode: 0o600,
+  });
+  fs.renameSync(temporary, file);
+}
+
+function carryForwardQuarantines({ priorRoot, activeRoot, projectId }) {
+  if (!fs.existsSync(priorRoot)) return 0;
+  fs.mkdirSync(activeRoot, { recursive: true });
+  let retained = 0;
+  for (const entry of fs.readdirSync(priorRoot, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.quarantine.json')) continue;
+    const source = path.join(priorRoot, entry.name);
+    const payload = JSON.parse(fs.readFileSync(source, 'utf8'));
+    if (
+      payload?.schemaVersion !== 1 ||
+      payload?.projectId !== projectId ||
+      payload?.disposition !== 'excluded-from-active-learning'
+    ) {
+      throw new Error(`Prior quarantine artifact is invalid: ${entry.name}`);
+    }
+    const destination = path.join(activeRoot, entry.name);
+    if (fs.existsSync(destination)) {
+      if (!fs.readFileSync(source).equals(fs.readFileSync(destination))) {
+        throw new Error(`Prior quarantine artifact conflicts with active state: ${entry.name}`);
+      }
+    } else {
+      fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
+    }
+    retained += 1;
+  }
+  return retained;
+}
+
+function quarantinePriorEnvelope({ priorFile, activeRoot, projectId, digest }) {
+  const rawEnvelope = fs.readFileSync(priorFile, 'utf8');
+  const priorEnvelopeSha256 = digest(rawEnvelope);
+  const file = path.join(
+    activeRoot,
+    `prior-learning-${priorEnvelopeSha256}.quarantine.json`,
+  );
+  if (!fs.existsSync(file)) {
+    writeJsonAtomic(file, {
+      schemaVersion: 1,
+      projectId,
+      disposition: 'excluded-from-active-learning',
+      reason: 'owner-approved quarantine of advanced prior worker state',
+      priorEnvelopeSha256,
+      durableEnvelope: JSON.parse(rawEnvelope),
+    });
+    return { file, created: true };
+  }
+  const existing = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (
+    existing?.projectId !== projectId ||
+    existing?.priorEnvelopeSha256 !== priorEnvelopeSha256 ||
+    existing?.disposition !== 'excluded-from-active-learning'
+  ) {
+    throw new Error('Existing prior-state quarantine artifact conflicts with this envelope.');
+  }
+  return { file, created: false };
 }
 
 function main(argv = process.argv.slice(2)) {
@@ -44,16 +130,33 @@ function main(argv = process.argv.slice(2)) {
   }
   const scientificLearning = require(path.resolve(engineRoot, 'src', 'scientificLearning.js'));
   const { DurableScientificLearningStore, sha } = scientificLearning;
+  const quarantinesRetained = carryForwardQuarantines({ priorRoot, activeRoot, projectId });
   const priorFile = path.join(path.resolve(priorRoot), `${sha(projectId)}.learning.json`);
   if (!fs.existsSync(priorFile)) {
-    const result = { imported: 0, duplicates: 0, priorCandidates: 0, priorStateAvailable: false };
+    const result = {
+      imported: 0,
+      duplicates: 0,
+      priorCandidates: 0,
+      quarantinedRecords: 0,
+      quarantinedKnowledgeVersions: 0,
+      quarantinedActiveVersion: false,
+      quarantinesRetained,
+      quarantineCreated: false,
+      priorStateAvailable: false,
+    };
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }
   const activeStore = new DurableScientificLearningStore({ root: activeRoot, projectId });
   const priorStore = new DurableScientificLearningStore({ root: priorRoot, projectId });
+  const merge = mergeCandidateOnly({ activeStore, priorStore, candidateDigest: sha });
+  const quarantine = merge.quarantineRequired
+    ? quarantinePriorEnvelope({ priorFile, activeRoot, projectId, digest: sha })
+    : null;
   const result = {
-    ...mergeCandidateOnly({ activeStore, priorStore, candidateDigest: sha }),
+    ...merge.summary,
+    quarantinesRetained,
+    quarantineCreated: Boolean(quarantine?.created),
     priorStateAvailable: true,
   };
   process.stdout.write(`${JSON.stringify(result)}\n`);
@@ -69,4 +172,9 @@ if (require.main === module) {
   }
 }
 
-module.exports = { mergeCandidateOnly, main };
+module.exports = {
+  carryForwardQuarantines,
+  mergeCandidateOnly,
+  quarantinePriorEnvelope,
+  main,
+};

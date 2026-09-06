@@ -43,7 +43,7 @@ $queuePreparation = node scripts/prepare-hosted-queue.js $queueFile $sourcesRoot
 if ($LASTEXITCODE -ne 0) { throw 'Hosted queue preparation failed.' }
 $learningMerge = node scripts/merge-prior-learning.js (Join-Path (Get-Location) 'crucible-engine') $learningRoot $priorLearningRoot $projectId | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw 'Prior candidate merge failed.' }
-Write-Output "Hosted state merge: actionable=$($queuePreparation.actionable) restoredProgress=$($queuePreparation.restoredProgress) importedCandidates=$($learningMerge.imported)"
+Write-Output "Hosted state merge: actionable=$($queuePreparation.actionable) restoredProgress=$($queuePreparation.restoredProgress) importedCandidates=$($learningMerge.imported) quarantinedRecords=$($learningMerge.quarantinedRecords) quarantinedKnowledgeVersions=$($learningMerge.quarantinedKnowledgeVersions) quarantinedActiveVersion=$($learningMerge.quarantinedActiveVersion)"
 $env:PYTHONPATH = Join-Path $sourcesRoot 'runtime-python'
 $env:CRUCIBLE_LEARNING_PROJECT_ID = $projectId
 $env:CRUCIBLE_LEARNING_ROOT = $learningRoot
@@ -86,6 +86,7 @@ try {
   $stateStage = Join-Path $workspace 'state-stage'; New-Item -ItemType Directory -Path (Join-Path $stateStage 'sources') -Force | Out-Null
   Copy-Item -LiteralPath $queueFile -Destination (Join-Path $stateStage 'sources\source-queue.json')
   Get-ChildItem -LiteralPath $learningRoot -File -Filter '*.learning.json' | Copy-Item -Destination $stateStage
+  Get-ChildItem -LiteralPath $learningRoot -File -Filter '*.quarantine.json' | Copy-Item -Destination $stateStage
   Copy-Item -LiteralPath $throughputFile -Destination $stateStage
   if (Test-Path -LiteralPath $oversightApprovalFile) { Copy-Item -LiteralPath $oversightApprovalFile -Destination $stateStage }
   Compress-Archive -Path (Join-Path $stateStage '*') -DestinationPath $stateZip -CompressionLevel Optimal -Force

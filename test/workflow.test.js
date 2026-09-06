@@ -12,6 +12,7 @@ test('hosted extraction keeps prior state separate from fresh vetted state', () 
   assert.doesNotMatch(script, /Expand-Archive[^\r\n]+\$learningRoot -Force/);
   assert.match(script, /prepare-hosted-queue\.js[^\r\n]+\$priorQueueFile/);
   assert.match(script, /merge-prior-learning\.js/);
+  assert.match(script, /Get-ChildItem[^\r\n]+\*\.quarantine\.json[^\r\n]+Copy-Item/);
 });
 
 test('hosted extraction fails zero throughput with actionable backlog after persisting artifacts', () => {
