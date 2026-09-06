@@ -50,6 +50,12 @@ jobs:
           $env:GIT_SSH_COMMAND = "ssh -i `"$(Join-Path $ssh 'key')`" -o IdentitiesOnly=yes -o UserKnownHostsFile=`"$(Join-Path $ssh 'known_hosts')`" -o StrictHostKeyChecking=yes"
           git clone --depth 1 git@github.com:jonathanblunt1214-lgtm/Crucible-Vetted-Learning-State.git vetted-state
 
+      - name: Run worker regression tests
+        shell: powershell
+        run: |
+          $testFiles = Get-ChildItem -LiteralPath test -File -Filter '*.test.js' | Select-Object -ExpandProperty FullName
+          node --test $testFiles
+
       - name: Run deterministic encrypted hosted extraction
         shell: powershell
         env:

@@ -17,3 +17,7 @@ This repository contains no committed plaintext training documents, extracted so
 - Extraction requires a signed independent-oversight approval bound to the exact source content hash; unvetted sources remain inhibited.
 
 The workflow has a concurrency lock and a 20-minute job timeout. Adaptive throughput state is retained only inside the authenticated encrypted state asset. A prior timed-out workflow immediately selects 35 pages; two consecutive completed runs longer than 15 minutes also select 35. Three consecutive runs of 10 minutes or less restore 70 pages. Its token can update only this private worker repository's encrypted release-state asset. It cannot write to The Crucible.
+
+Each run treats the newly verified vetted-custody queue and learning envelope as authoritative. Prior encrypted worker state is decrypted into a separate directory; only extraction progress for the same source id and exact content hash, plus candidate-only records with identical duplicate bodies, may be merged forward. Removed sources, changed content, advanced learning records, and knowledge versions fail closed or remain excluded.
+
+The hosted job reports the vetted-state commit and oversight report timestamp. If actionable extraction backlog exists but the worker processes zero sources, or if every processed source is blocked, the encrypted diagnostic state is still uploaded and the original extraction condition then fails the job. Artifact persistence is additive and cannot replace the pipeline failure.

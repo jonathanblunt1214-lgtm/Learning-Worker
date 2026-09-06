@@ -6,8 +6,10 @@ $stateZip = Join-Path $workspace 'state.zip'
 $sourceTar = Join-Path $workspace 'vetted-source-bundle.tar.gz'
 $vettedRoot = Join-Path $workspace 'vetted-source-root'
 $learningRoot = Join-Path $workspace 'learning'
+$priorLearningRoot = Join-Path $workspace 'prior-learning'
 $sourcesRoot = Join-Path $vettedRoot 'sources'
 $queueFile = Join-Path $learningRoot 'sources\source-queue.json'
+$priorQueueFile = Join-Path $priorLearningRoot 'sources\source-queue.json'
 $throughputFile = Join-Path $learningRoot 'adaptive-throughput.json'
 $oversightApprovalFile = Join-Path $learningRoot 'oversight-approvals.json'
 $vettedApprovalFile = Join-Path $workspace 'vetted-oversight-approvals.json'
@@ -19,6 +21,9 @@ if (-not $env:OVERSIGHT_SIGNING_PUBLIC_KEY) { throw 'Independent oversight publi
 [IO.File]::WriteAllText($oversightPublicKey, $env:OVERSIGHT_SIGNING_PUBLIC_KEY)
 node scripts/vetted-custody.js (Join-Path (Get-Location) 'vetted-state') $sourceTar $oversightPublicKey $vettedApprovalFile
 if ($LASTEXITCODE -ne 0) { throw 'Vetted encrypted custody verification failed.' }
+$vettedStateSha = (git -C vetted-state rev-parse HEAD).Trim()
+$vettedReport = Get-Content -Raw (Join-Path (Get-Location) 'vetted-state\encrypted-custody-report.json') | ConvertFrom-Json
+Write-Output "Vetted custody lineage: commit=$vettedStateSha generatedAt=$($vettedReport.generatedAt)"
 New-Item -ItemType Directory -Path $vettedRoot -Force | Out-Null
 tar -xzf $sourceTar -C $vettedRoot
 New-Item -ItemType Directory -Path (Split-Path $queueFile) -Force | Out-Null
@@ -26,10 +31,19 @@ Copy-Item -LiteralPath (Join-Path $vettedRoot 'source-queue.json') -Destination 
 Get-ChildItem -LiteralPath $vettedRoot -File -Filter '*.learning.json' | Copy-Item -Destination $learningRoot
 $priorStateAvailable = $true
 try { gh release download worker-state --repo $env:GITHUB_REPOSITORY --pattern 'state.zip.enc' --dir $workspace --clobber } catch { $priorStateAvailable = $false }
-if ($priorStateAvailable -and (Test-Path -LiteralPath $encryptedState)) { node scripts/crypt-bundle.js decrypt $encryptedState $stateZip; Expand-Archive -LiteralPath $stateZip -DestinationPath $learningRoot -Force }
+if ($priorStateAvailable -and (Test-Path -LiteralPath $encryptedState)) {
+  node scripts/crypt-bundle.js decrypt $encryptedState $stateZip
+  if ($LASTEXITCODE -ne 0) { throw 'Prior encrypted worker state could not be authenticated.' }
+  New-Item -ItemType Directory -Path $priorLearningRoot -Force | Out-Null
+  Expand-Archive -LiteralPath $stateZip -DestinationPath $priorLearningRoot -Force
+}
 Copy-Item -LiteralPath $vettedApprovalFile -Destination $oversightApprovalFile -Force
 Remove-Item -LiteralPath $oversightPublicKey -Force
-node scripts/prepare-hosted-queue.js $queueFile $sourcesRoot $oversightApprovalFile
+$queuePreparation = node scripts/prepare-hosted-queue.js $queueFile $sourcesRoot $oversightApprovalFile $priorQueueFile | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'Hosted queue preparation failed.' }
+$learningMerge = node scripts/merge-prior-learning.js (Join-Path (Get-Location) 'crucible-engine') $learningRoot $priorLearningRoot $projectId | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'Prior candidate merge failed.' }
+Write-Output "Hosted state merge: actionable=$($queuePreparation.actionable) restoredProgress=$($queuePreparation.restoredProgress) importedCandidates=$($learningMerge.imported)"
 $env:PYTHONPATH = Join-Path $sourcesRoot 'runtime-python'
 $env:CRUCIBLE_LEARNING_PROJECT_ID = $projectId
 $env:CRUCIBLE_LEARNING_ROOT = $learningRoot
@@ -42,17 +56,48 @@ $throughput = node scripts/adaptive-throughput.js plan $throughputFile $previous
 $env:CRUCIBLE_PDF_PAGES_PER_BATCH = [string]$throughput.pagesPerDocument
 Write-Output "Adaptive extraction plan: maxSources=25 maxDocuments=9 pagesPerDocument=$($throughput.pagesPerDocument) previousConclusion=$previousConclusion"
 $env:CRUCIBLE_PYTHON = (Get-Command python).Source
+$pipelineFailure = $null
+$extractionResult = $null
 Push-Location crucible-engine
-try { node src/claimExtractionWorkerCli.js readiness; if ($LASTEXITCODE -ne 0) { throw 'Extraction readiness failed.' }; node src/claimExtractionWorkerCli.js run; if ($LASTEXITCODE -ne 0) { throw 'Extraction failed.' } } finally { Pop-Location }
+try {
+  node src/claimExtractionWorkerCli.js readiness
+  if ($LASTEXITCODE -ne 0) {
+    $pipelineFailure = 'Extraction readiness failed.'
+  } else {
+    $extractionOutput = @(node src/claimExtractionWorkerCli.js run)
+    $extractionExitCode = $LASTEXITCODE
+    $extractionOutput | ForEach-Object { Write-Output $_ }
+    if ($extractionExitCode -ne 0) {
+      $pipelineFailure = 'Extraction failed.'
+    } else {
+      $extractionResult = ($extractionOutput -join [Environment]::NewLine) | ConvertFrom-Json
+      if ($queuePreparation.actionable -gt 0 -and $extractionResult.processed -eq 0) {
+        $pipelineFailure = "Extraction processed zero sources while $($queuePreparation.actionable) actionable sources were queued."
+      } elseif ($extractionResult.processed -gt 0 -and ($extractionResult.completed + $extractionResult.continuing) -eq 0) {
+        $pipelineFailure = "Extraction blocked every processed source ($($extractionResult.blocked) blocked)."
+      }
+    }
+  }
+} finally { Pop-Location }
 $durationSeconds = [Math]::Round(((Get-Date) - $runStartedAt).TotalSeconds, 3)
-node scripts/adaptive-throughput.js complete $throughputFile $durationSeconds | Out-Null
-Write-Output "Adaptive extraction result: durationSeconds=$durationSeconds statePersisted=true"
-$stateStage = Join-Path $workspace 'state-stage'; New-Item -ItemType Directory -Path (Join-Path $stateStage 'sources') -Force | Out-Null
-Copy-Item -LiteralPath $queueFile -Destination (Join-Path $stateStage 'sources\source-queue.json')
-Get-ChildItem -LiteralPath $learningRoot -File -Filter '*.learning.json' | Copy-Item -Destination $stateStage
-Copy-Item -LiteralPath $throughputFile -Destination $stateStage
-if (Test-Path -LiteralPath $oversightApprovalFile) { Copy-Item -LiteralPath $oversightApprovalFile -Destination $stateStage }
-Compress-Archive -Path (Join-Path $stateStage '*') -DestinationPath $stateZip -CompressionLevel Optimal -Force
-Remove-Item -LiteralPath $encryptedState -Force
-node scripts/crypt-bundle.js encrypt $stateZip $encryptedState
-gh release upload worker-state $encryptedState --repo $env:GITHUB_REPOSITORY --clobber
+if (-not $pipelineFailure) { node scripts/adaptive-throughput.js complete $throughputFile $durationSeconds | Out-Null }
+$artifactFailure = $null
+try {
+  $stateStage = Join-Path $workspace 'state-stage'; New-Item -ItemType Directory -Path (Join-Path $stateStage 'sources') -Force | Out-Null
+  Copy-Item -LiteralPath $queueFile -Destination (Join-Path $stateStage 'sources\source-queue.json')
+  Get-ChildItem -LiteralPath $learningRoot -File -Filter '*.learning.json' | Copy-Item -Destination $stateStage
+  Copy-Item -LiteralPath $throughputFile -Destination $stateStage
+  if (Test-Path -LiteralPath $oversightApprovalFile) { Copy-Item -LiteralPath $oversightApprovalFile -Destination $stateStage }
+  Compress-Archive -Path (Join-Path $stateStage '*') -DestinationPath $stateZip -CompressionLevel Optimal -Force
+  Remove-Item -LiteralPath $encryptedState -Force
+  node scripts/crypt-bundle.js encrypt $stateZip $encryptedState
+  if ($LASTEXITCODE -ne 0) { throw 'Worker state encryption failed.' }
+  gh release upload worker-state $encryptedState --repo $env:GITHUB_REPOSITORY --clobber
+  if ($LASTEXITCODE -ne 0) { throw 'Encrypted worker state upload failed.' }
+  Write-Output "Adaptive extraction result: durationSeconds=$durationSeconds statePersisted=true"
+} catch {
+  $artifactFailure = $_.Exception.Message
+}
+if ($pipelineFailure -and $artifactFailure) { Write-Warning "Additive state persistence also failed: $artifactFailure" }
+if ($pipelineFailure) { throw $pipelineFailure }
+if ($artifactFailure) { throw $artifactFailure }
