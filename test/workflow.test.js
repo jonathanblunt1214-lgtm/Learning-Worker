@@ -26,6 +26,13 @@ test('hosted extraction fails zero throughput with actionable backlog after pers
   );
 });
 
+test('adaptive throughput selects exactly one prior completed run on Windows PowerShell', () => {
+  const script = fs.readFileSync(path.join(root, 'scripts', 'run-hosted-extraction.ps1'), 'utf8');
+  assert.match(script, /foreach \(\$candidateRun in \$priorRuns\)/);
+  assert.match(script, /\$priorRun = \$candidateRun\r?\n    break/);
+  assert.doesNotMatch(script, /ConvertFrom-Json \| Where-Object/);
+});
+
 test('workflow runs worker regression tests before hosted extraction', () => {
   const workflow = fs.readFileSync(path.join(root, '.github', 'workflows', 'extract.yml'), 'utf8');
   assert.match(workflow, /permissions:\r?\n  actions: read\r?\n  contents: write/);

@@ -50,7 +50,15 @@ $env:CRUCIBLE_LEARNING_ROOT = $learningRoot
 $env:CRUCIBLE_SOURCE_QUEUE = $queueFile
 $env:CRUCIBLE_EXTRACTION_BATCH_SIZE = '25'
 $env:CRUCIBLE_EXTRACTION_MAX_DOCUMENTS = '9'
-$priorRun = gh run list --repo $env:GITHUB_REPOSITORY --workflow extract.yml --limit 5 --json databaseId,status,conclusion,createdAt,updatedAt | ConvertFrom-Json | Where-Object { [string]$_.databaseId -ne $env:GITHUB_RUN_ID -and $_.status -eq 'completed' } | Select-Object -First 1
+$priorRuns = gh run list --repo $env:GITHUB_REPOSITORY --workflow extract.yml --limit 5 --json databaseId,status,conclusion,createdAt,updatedAt | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) { throw 'Prior extraction run history is unavailable.' }
+$priorRun = $null
+foreach ($candidateRun in $priorRuns) {
+  if ([string]$candidateRun.databaseId -ne $env:GITHUB_RUN_ID -and $candidateRun.status -eq 'completed') {
+    $priorRun = $candidateRun
+    break
+  }
+}
 $previousConclusion = if ($priorRun) { [string]$priorRun.conclusion } else { '' }
 $throughput = node scripts/adaptive-throughput.js plan $throughputFile $previousConclusion | ConvertFrom-Json
 $env:CRUCIBLE_PDF_PAGES_PER_BATCH = [string]$throughput.pagesPerDocument
