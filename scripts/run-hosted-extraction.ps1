@@ -115,8 +115,12 @@ try {
   git worktree add --detach $exportWorktree HEAD | Out-Null
   if ($LASTEXITCODE -ne 0) { throw 'Independent-oversight export worktree could not be created.' }
   try {
+    $priorErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     git -C $exportWorktree fetch origin oversight-export 2>$null
-    if ($LASTEXITCODE -eq 0) {
+    $exportBranchExists = $LASTEXITCODE -eq 0
+    $ErrorActionPreference = $priorErrorActionPreference
+    if ($exportBranchExists) {
       git -C $exportWorktree switch -C oversight-export origin/oversight-export | Out-Null
     } else {
       git -C $exportWorktree switch --orphan oversight-export | Out-Null

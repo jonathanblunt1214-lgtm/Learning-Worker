@@ -46,6 +46,7 @@ test('hosted extraction publishes a separate candidate-only export for oversight
   assert.match(script, /oversight-state-stage/);
   assert.match(script, /oversight-export\.js build/);
   assert.match(script, /HEAD:oversight-export/);
+  assert.match(script, /\$ErrorActionPreference = 'Continue'[\s\S]*?\$exportBranchExists = \$LASTEXITCODE -eq 0[\s\S]*?\$ErrorActionPreference = \$priorErrorActionPreference/);
   assert.doesNotMatch(script, /Get-ChildItem[^\r\n]+\.quarantine\.json[^\r\n]+\$oversightStage/);
   assert.ok(
     script.indexOf('HEAD:oversight-export') < script.lastIndexOf('throw $pipelineFailure'),
