@@ -28,5 +28,6 @@ test('hosted extraction fails zero throughput with actionable backlog after pers
 
 test('workflow runs worker regression tests before hosted extraction', () => {
   const workflow = fs.readFileSync(path.join(root, '.github', 'workflows', 'extract.yml'), 'utf8');
+  assert.match(workflow, /permissions:\r?\n  actions: read\r?\n  contents: write/);
   assert.ok(workflow.indexOf('Run worker regression tests') < workflow.indexOf('Run deterministic encrypted hosted extraction'));
 });
