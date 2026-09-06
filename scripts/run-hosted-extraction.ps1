@@ -43,7 +43,7 @@ $queuePreparation = node scripts/prepare-hosted-queue.js $queueFile $sourcesRoot
 if ($LASTEXITCODE -ne 0) { throw 'Hosted queue preparation failed.' }
 $learningMerge = node scripts/merge-prior-learning.js (Join-Path (Get-Location) 'crucible-engine') $learningRoot $priorLearningRoot $projectId | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw 'Prior candidate merge failed.' }
-Write-Output "Hosted state merge: actionable=$($queuePreparation.actionable) restoredProgress=$($queuePreparation.restoredProgress) importedCandidates=$($learningMerge.imported) quarantinedRecords=$($learningMerge.quarantinedRecords) quarantinedKnowledgeVersions=$($learningMerge.quarantinedKnowledgeVersions) quarantinedActiveVersion=$($learningMerge.quarantinedActiveVersion)"
+Write-Output "Hosted state merge: actionable=$($queuePreparation.actionable) restoredProgress=$($queuePreparation.restoredProgress) importedCandidates=$($learningMerge.imported) recoveredFromQuarantine=$($learningMerge.recoveredFromQuarantine) quarantinedRecords=$($learningMerge.quarantinedRecords) quarantinedKnowledgeVersions=$($learningMerge.quarantinedKnowledgeVersions) quarantinedActiveVersion=$($learningMerge.quarantinedActiveVersion)"
 $env:PYTHONPATH = Join-Path $sourcesRoot 'runtime-python'
 $env:CRUCIBLE_LEARNING_PROJECT_ID = $projectId
 $env:CRUCIBLE_LEARNING_ROOT = $learningRoot

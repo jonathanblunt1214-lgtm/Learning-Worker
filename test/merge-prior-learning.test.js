@@ -8,6 +8,7 @@ const {
   carryForwardQuarantines,
   mergeCandidateOnly,
   quarantinePriorEnvelope,
+  readQuarantinePayloads,
 } = require('../scripts/merge-prior-learning');
 
 function candidate(id, claim = id) {
@@ -86,6 +87,21 @@ test('advanced records and knowledge versions are excluded for quarantine', () =
   assert.equal(result.quarantineRequired, true);
 });
 
+test('legacy candidate records without recordRevision are revision zero', () => {
+  const legacy = record(candidate('legacy'));
+  delete legacy.recordRevision;
+  const active = store();
+  const result = mergeCandidateOnly({
+    activeStore: active,
+    priorStore: store([legacy]),
+    candidateDigest: digest,
+  });
+  assert.equal(result.summary.imported, 1);
+  assert.equal(result.summary.quarantinedRecords, 0);
+  assert.equal(result.quarantineRequired, false);
+  assert.equal(active.read().candidateRecords[0].candidate.id, 'legacy');
+});
+
 test('identical advanced state already vetted as active is not quarantined again', () => {
   const advanced = record(candidate('advanced'), 'hypothesis', 1);
   const knowledge = { version: 1, claim: 'same' };
@@ -108,7 +124,16 @@ test('quarantine preserves the complete prior envelope and carries forward uncha
   const activeRoot = path.join(root, 'active');
   const nextRoot = path.join(root, 'next');
   const projectId = 'github:jonathanblunt1214-lgtm/The-Crucible';
-  const envelope = { schemaVersion: 1, payload: { advanced: true }, payloadSha256: 'a'.repeat(64) };
+  const payload = {
+    schemaVersion: 1,
+    projectId,
+    revision: 0,
+    candidateRecords: [],
+    knowledgeVersions: [],
+    activeVersion: null,
+    auditLog: [],
+  };
+  const envelope = { schemaVersion: 1, payload, payloadSha256: digest(payload) };
   fs.writeFileSync(priorFile, `${JSON.stringify(envelope, null, 2)}\n`);
   fs.mkdirSync(activeRoot);
   const created = quarantinePriorEnvelope({
@@ -124,4 +149,5 @@ test('quarantine preserves the complete prior envelope and carries forward uncha
   assert.equal(carryForwardQuarantines({ priorRoot: activeRoot, activeRoot: nextRoot, projectId }), 1);
   const copied = path.join(nextRoot, path.basename(created.file));
   assert.ok(fs.readFileSync(created.file).equals(fs.readFileSync(copied)));
+  assert.deepEqual(readQuarantinePayloads({ root: nextRoot, projectId, digest }), [payload]);
 });
