@@ -3,6 +3,8 @@ $projectId = 'github:jonathanblunt1214-lgtm/The-Crucible'
 $workspace = $env:RUNNER_TEMP
 $encryptedState = Join-Path $workspace 'state.zip.enc'
 $stateZip = Join-Path $workspace 'state.zip'
+$oversightStateZip = Join-Path $workspace 'oversight-state.zip'
+$oversightExportRoot = Join-Path $workspace 'oversight-export'
 $sourceTar = Join-Path $workspace 'vetted-source-bundle.tar.gz'
 $vettedRoot = Join-Path $workspace 'vetted-source-root'
 $learningRoot = Join-Path $workspace 'learning'
@@ -16,6 +18,7 @@ $vettedApprovalFile = Join-Path $workspace 'vetted-oversight-approvals.json'
 $runStartedAt = Get-Date
 if ($env:GITHUB_REPOSITORY -ne 'jonathanblunt1214-lgtm/Learning-Worker') { throw 'Unexpected repository identity.' }
 if (-not $env:LEARNING_WORKER_KEY) { throw 'Encrypted-state key is unavailable.' }
+if (-not $env:OVERSIGHT_WORKER_BUNDLE_KEY) { throw 'Independent-oversight export key is unavailable.' }
 $oversightPublicKey = Join-Path $workspace 'oversight-public.pem'
 if (-not $env:OVERSIGHT_SIGNING_PUBLIC_KEY) { throw 'Independent oversight public key is unavailable.' }
 [IO.File]::WriteAllText($oversightPublicKey, $env:OVERSIGHT_SIGNING_PUBLIC_KEY)
@@ -98,6 +101,45 @@ try {
   Copy-Item -LiteralPath $throughputFile -Destination $stateStage
   if (Test-Path -LiteralPath $oversightApprovalFile) { Copy-Item -LiteralPath $oversightApprovalFile -Destination $stateStage }
   Compress-Archive -Path (Join-Path $stateStage '*') -DestinationPath $stateZip -CompressionLevel Optimal -Force
+
+  $oversightStage = Join-Path $workspace 'oversight-state-stage'
+  New-Item -ItemType Directory -Path (Join-Path $oversightStage 'sources') -Force | Out-Null
+  Copy-Item -LiteralPath $queueFile -Destination (Join-Path $oversightStage 'sources\source-queue.json')
+  Get-ChildItem -LiteralPath $learningRoot -File -Filter '*.learning.json' | Copy-Item -Destination $oversightStage
+  Compress-Archive -Path (Join-Path $oversightStage '*') -DestinationPath $oversightStateZip -CompressionLevel Optimal -Force
+  New-Item -ItemType Directory -Path $oversightExportRoot -Force | Out-Null
+  node scripts/oversight-export.js build $oversightStateZip $oversightExportRoot $env:GITHUB_SHA $vettedStateSha | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'Independent-oversight export encryption failed.' }
+
+  $exportWorktree = Join-Path $workspace 'oversight-export-branch'
+  git worktree add --detach $exportWorktree HEAD | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'Independent-oversight export worktree could not be created.' }
+  try {
+    git -C $exportWorktree fetch origin oversight-export 2>$null
+    if ($LASTEXITCODE -eq 0) {
+      git -C $exportWorktree switch -C oversight-export origin/oversight-export | Out-Null
+    } else {
+      git -C $exportWorktree switch --orphan oversight-export | Out-Null
+      git -C $exportWorktree rm -rf . | Out-Null
+    }
+    $newManifest = Get-Content -Raw (Join-Path $oversightExportRoot 'worker-export-manifest.json') | ConvertFrom-Json
+    $existingManifestFile = Join-Path $exportWorktree 'worker-export-manifest.json'
+    $existingPlaintextSha = if (Test-Path -LiteralPath $existingManifestFile) { (Get-Content -Raw $existingManifestFile | ConvertFrom-Json).plaintextSha256 } else { '' }
+    if ($existingPlaintextSha -ne $newManifest.plaintextSha256) {
+      git -C $exportWorktree rm --ignore-unmatch -- worker-export-manifest.json 'worker-state.part-*.enc' | Out-Null
+      Copy-Item -LiteralPath (Join-Path $oversightExportRoot 'worker-export-manifest.json') -Destination $exportWorktree
+      Get-ChildItem -LiteralPath $oversightExportRoot -File -Filter 'worker-state.part-*.enc' | Copy-Item -Destination $exportWorktree
+      git -C $exportWorktree add -- worker-export-manifest.json 'worker-state.part-*.enc'
+      git -C $exportWorktree -c user.name='Crucible Learning Worker' -c user.email='learning-worker@invalid.local' commit -m "Publish candidate export $($newManifest.plaintextSha256)" | Out-Null
+      git -C $exportWorktree push origin HEAD:oversight-export
+      if ($LASTEXITCODE -ne 0) { throw 'Independent-oversight export publication failed.' }
+    } else {
+      Write-Output "Independent-oversight export unchanged: plaintextSha256=$existingPlaintextSha"
+    }
+  } finally {
+    git worktree remove --force $exportWorktree | Out-Null
+  }
+
   Remove-Item -LiteralPath $encryptedState -Force
   node scripts/crypt-bundle.js encrypt $stateZip $encryptedState
   if ($LASTEXITCODE -ne 0) { throw 'Worker state encryption failed.' }

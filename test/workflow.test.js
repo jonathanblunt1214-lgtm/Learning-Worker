@@ -38,3 +38,17 @@ test('workflow runs worker regression tests before hosted extraction', () => {
   assert.match(workflow, /permissions:\r?\n  actions: read\r?\n  contents: write/);
   assert.ok(workflow.indexOf('Run worker regression tests') < workflow.indexOf('Run deterministic encrypted hosted extraction'));
 });
+
+test('hosted extraction publishes a separate candidate-only export for oversight', () => {
+  const script = fs.readFileSync(path.join(root, 'scripts', 'run-hosted-extraction.ps1'), 'utf8');
+  const workflow = fs.readFileSync(path.join(root, '.github', 'workflows', 'extract.yml'), 'utf8');
+  assert.match(workflow, /OVERSIGHT_WORKER_BUNDLE_KEY/);
+  assert.match(script, /oversight-state-stage/);
+  assert.match(script, /oversight-export\.js build/);
+  assert.match(script, /HEAD:oversight-export/);
+  assert.doesNotMatch(script, /Get-ChildItem[^\r\n]+\.quarantine\.json[^\r\n]+\$oversightStage/);
+  assert.ok(
+    script.indexOf('HEAD:oversight-export') < script.lastIndexOf('throw $pipelineFailure'),
+    'candidate export must remain additive to the original pipeline result',
+  );
+});

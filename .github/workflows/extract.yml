@@ -62,6 +62,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           LEARNING_WORKER_KEY: ${{ secrets.LEARNING_WORKER_KEY }}
+          OVERSIGHT_WORKER_BUNDLE_KEY: ${{ secrets.OVERSIGHT_WORKER_BUNDLE_KEY }}
           CRUCIBLE_VETTED_BUNDLE_KEY: ${{ secrets.CRUCIBLE_VETTED_BUNDLE_KEY }}
           OVERSIGHT_SIGNING_PUBLIC_KEY: ${{ vars.OVERSIGHT_SIGNING_PUBLIC_KEY }}
         run: .\scripts\run-hosted-extraction.ps1
