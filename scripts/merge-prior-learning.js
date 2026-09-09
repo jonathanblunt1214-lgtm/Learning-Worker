@@ -1,7 +1,13 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-function mergeCandidateOnly({ activeStore, priorStore, candidateDigest }) {
+function candidateMatchesCurrentSource(record, sourceContentById) {
+  if (!sourceContentById) return true;
+  const provenance = record?.candidate?.provenance;
+  return sourceContentById.get(String(provenance?.sourceId)) === provenance?.contentSha256;
+}
+
+function mergeCandidateOnly({ activeStore, priorStore, candidateDigest, sourceContentById = null }) {
   const active = activeStore.read();
   const prior = priorStore.read();
   const activeById = new Map(
@@ -12,7 +18,7 @@ function mergeCandidateOnly({ activeStore, priorStore, candidateDigest }) {
   let quarantinedRecords = 0;
 
   for (const record of prior.candidateRecords) {
-    if (record.state !== 'candidate' || (record.recordRevision ?? 0) !== 0) {
+    if (record.state !== 'candidate' || (record.recordRevision ?? 0) !== 0 || !candidateMatchesCurrentSource(record, sourceContentById)) {
       const authoritative = activeById.get(record.candidate.id);
       if (authoritative && candidateDigest(authoritative) === candidateDigest(record)) {
         duplicates += 1;
@@ -53,6 +59,25 @@ function mergeCandidateOnly({ activeStore, priorStore, candidateDigest }) {
       quarantinedKnowledgeVersions > 0 ||
       quarantinedActiveVersion,
   };
+}
+
+function sanitizeActiveCandidateCustody({ activeFile, activeRoot, projectId, digest, sourceContentById }) {
+  if (!fs.existsSync(activeFile)) return 0;
+  const envelope = JSON.parse(fs.readFileSync(activeFile, 'utf8'));
+  if (envelope?.schemaVersion !== 1 || envelope?.payload?.projectId !== projectId || envelope.payloadSha256 !== digest(envelope.payload)) {
+    throw new Error('Active vetted learning envelope is invalid.');
+  }
+  const records = envelope.payload.candidateRecords;
+  if (!Array.isArray(records)) throw new Error('Active vetted candidate records are invalid.');
+  const retained = records.filter((record) => candidateMatchesCurrentSource(record, sourceContentById));
+  const removed = records.length - retained.length;
+  if (removed === 0) return 0;
+  quarantinePriorEnvelope({ priorFile: activeFile, activeRoot, projectId, digest });
+  envelope.payload.candidateRecords = retained;
+  envelope.payloadSha256 = digest(envelope.payload);
+  writeJsonAtomic(`${activeFile}.sanitized`, envelope);
+  fs.renameSync(`${activeFile}.sanitized`, activeFile);
+  return removed;
 }
 
 function writeJsonAtomic(file, value) {
@@ -152,6 +177,10 @@ function main(argv = process.argv.slice(2)) {
   }
   const scientificLearning = require(path.resolve(engineRoot, 'src', 'scientificLearning.js'));
   const { DurableScientificLearningStore, sha } = scientificLearning;
+  const queue = JSON.parse(fs.readFileSync(path.join(activeRoot, 'sources', 'source-queue.json'), 'utf8'));
+  const sourceContentById = new Map([...queue.documents, ...queue.links].map((source) => [String(source.id), source.contentSha256]));
+  const activeFile = path.join(path.resolve(activeRoot), `${sha(projectId)}.learning.json`);
+  const staleActiveCandidatesQuarantined = sanitizeActiveCandidateCustody({ activeFile, activeRoot, projectId, digest: sha, sourceContentById });
   const quarantinesRetained = carryForwardQuarantines({ priorRoot, activeRoot, projectId });
   const quarantinePayloads = readQuarantinePayloads({ root: priorRoot, projectId, digest: sha });
   const priorFile = path.join(path.resolve(priorRoot), `${sha(projectId)}.learning.json`);
@@ -166,6 +195,7 @@ function main(argv = process.argv.slice(2)) {
       quarantinesRetained,
       quarantineCreated: false,
       recoveredFromQuarantine: 0,
+      staleActiveCandidatesQuarantined,
       priorStateAvailable: false,
     };
     process.stdout.write(`${JSON.stringify(result)}\n`);
@@ -178,6 +208,7 @@ function main(argv = process.argv.slice(2)) {
       activeStore,
       priorStore: { read: () => structuredClone(payload) },
       candidateDigest: sha,
+      sourceContentById,
     });
     recoveredFromQuarantine += recovery.summary.imported;
   }
@@ -192,13 +223,14 @@ function main(argv = process.argv.slice(2)) {
       quarantinesRetained,
       quarantineCreated: false,
       recoveredFromQuarantine,
+      staleActiveCandidatesQuarantined,
       priorStateAvailable: true,
     };
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }
   const priorStore = new DurableScientificLearningStore({ root: priorRoot, projectId });
-  const merge = mergeCandidateOnly({ activeStore, priorStore, candidateDigest: sha });
+  const merge = mergeCandidateOnly({ activeStore, priorStore, candidateDigest: sha, sourceContentById });
   const quarantine = merge.quarantineRequired
     ? quarantinePriorEnvelope({ priorFile, activeRoot, projectId, digest: sha })
     : null;
@@ -207,6 +239,7 @@ function main(argv = process.argv.slice(2)) {
     quarantinesRetained,
     quarantineCreated: Boolean(quarantine?.created),
     recoveredFromQuarantine,
+    staleActiveCandidatesQuarantined,
     priorStateAvailable: true,
   };
   process.stdout.write(`${JSON.stringify(result)}\n`);
@@ -224,8 +257,10 @@ if (require.main === module) {
 
 module.exports = {
   carryForwardQuarantines,
+  candidateMatchesCurrentSource,
   mergeCandidateOnly,
   quarantinePriorEnvelope,
   readQuarantinePayloads,
+  sanitizeActiveCandidateCustody,
   main,
 };

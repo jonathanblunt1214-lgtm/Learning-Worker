@@ -9,6 +9,7 @@ const {
   mergeCandidateOnly,
   quarantinePriorEnvelope,
   readQuarantinePayloads,
+  sanitizeActiveCandidateCustody,
 } = require('../scripts/merge-prior-learning');
 
 function candidate(id, claim = id) {
@@ -100,6 +101,33 @@ test('legacy candidate records without recordRevision are revision zero', () => 
   assert.equal(result.summary.quarantinedRecords, 0);
   assert.equal(result.quarantineRequired, false);
   assert.equal(active.read().candidateRecords[0].candidate.id, 'legacy');
+});
+
+test('stale source candidates leave active custody but remain in encrypted-state quarantine', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stale-candidate-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const projectId = 'github:owner/repo';
+  const activeFile = path.join(root, 'active.learning.json');
+  const current = record({ id: 'current', provenance: { sourceId: 'source-current', contentSha256: 'a'.repeat(64) } });
+  const stale = record({ id: 'stale', provenance: { sourceId: 'source-stale', contentSha256: 'b'.repeat(64) } });
+  const payload = { projectId, candidateRecords: [current, stale], knowledgeVersions: [], activeVersion: null };
+  fs.writeFileSync(activeFile, JSON.stringify({ schemaVersion: 1, payload, payloadSha256: digest(payload) }));
+
+  const removed = sanitizeActiveCandidateCustody({
+    activeFile,
+    activeRoot: root,
+    projectId,
+    digest,
+    sourceContentById: new Map([['source-current', 'a'.repeat(64)], ['source-stale', 'c'.repeat(64)]]),
+  });
+
+  assert.equal(removed, 1);
+  const sanitized = JSON.parse(fs.readFileSync(activeFile));
+  assert.deepEqual(sanitized.payload.candidateRecords.map((item) => item.candidate.id), ['current']);
+  assert.equal(sanitized.payloadSha256, digest(sanitized.payload));
+  const quarantine = fs.readdirSync(root).find((name) => name.endsWith('.quarantine.json'));
+  const preserved = JSON.parse(fs.readFileSync(path.join(root, quarantine)));
+  assert.deepEqual(preserved.durableEnvelope.payload.candidateRecords.map((item) => item.candidate.id), ['current', 'stale']);
 });
 
 test('identical advanced state already vetted as active is not quarantined again', () => {
