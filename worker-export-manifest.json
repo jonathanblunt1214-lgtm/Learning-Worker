@@ -6,17 +6,17 @@
   "repository": "jonathanblunt1214-lgtm/Learning-Worker",
   "ref": "refs/heads/main",
   "workerSha": "671922249a431bf4e40c234424ff2868e9ba192f",
-  "vettedStateSha": "ca03c362094f34be911d88ba77585bba62e7f90e",
-  "generatedAt": "2026-09-21T17:00:35.658Z",
-  "plaintextSha256": "278af6b6f3989c1a30f0f5dc06b33daafc5b6ef1361c43fa54079c0173b6d0a1",
+  "vettedStateSha": "182e6a5cfdf1f503f8bf430a9e56e7c0408b7889",
+  "generatedAt": "2026-09-21T20:56:49.310Z",
+  "plaintextSha256": "28058fa3afa42a2d301d5f63de8ebc203224c9a61657ffa24b00a6aaf560280b",
   "plaintextBytes": 3573544,
-  "encryptedSha256": "a0c9af868c590f1d667856d1148081bb5cff6aa5bdb077b41a4b34d938626364",
+  "encryptedSha256": "af2970ce07c0259cb1d00cb3c90103e083abe728e911ce7d10332096752a8400",
   "encryptedBytes": 3574101,
   "chunks": [
     {
       "name": "worker-state.part-0000.enc",
       "bytes": 3574101,
-      "sha256": "a0c9af868c590f1d667856d1148081bb5cff6aa5bdb077b41a4b34d938626364"
+      "sha256": "af2970ce07c0259cb1d00cb3c90103e083abe728e911ce7d10332096752a8400"
     }
   ]
 }
